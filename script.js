@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const fontSizeDisplay = document.getElementById('fontSizeDisplay');
     const wordWrapToggle = document.getElementById('wordWrapToggle');
     let spellCheckToggle = document.getElementById('spellCheckToggle');
+    let powerSavingToggle = document.getElementById('powerSavingToggle');
     const themeBtns = document.querySelectorAll('.theme-btn');
 
     // About Modal
@@ -57,15 +58,22 @@ document.addEventListener('DOMContentLoaded', function () {
     const STORAGE_PREFIX = 'notepad_v2_';
     const TABS_KEY = 'notepad_v2_tabs';
     const TAB_TITLE_MAX_LENGTH = 20;
+    const WRAP_MEASURE_LINE_LIMIT = 2000;
     let tabs = [];
     let activeTabId = null;
+    let refreshFrameId = null;
+    let lastRenderedLineCount = -1;
+    let lastRenderWrapMode = null;
+    let lastActiveLineIndex = -1;
+    let lineMeasureMirror = null;
 
     // Settings State
     let settings = {
         theme: 'system', // system, light, dark
         fontSize: 16,
         wordWrap: true,
-        spellCheck: false
+        spellCheck: false,
+        powerSaving: false
     };
 
     // --- Initialization ---
@@ -75,6 +83,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     ensureSpellCheckToggle();
     localizeSpellCheckToggleLabel();
+    ensurePowerSavingToggle();
+    localizePowerSavingToggleLabel();
     loadSettings();
     applySettings();
     initTabs();
@@ -83,8 +93,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Editor Interaction
     editor.addEventListener('input', () => {
-        updateLineNumbers();
-        updateStats();
+        requestUiRefresh();
         scheduleAutosave();
         updateSaveStatus(window.i18n ? window.i18n.unsaved : 'Unsaved');
     });
@@ -103,7 +112,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const end = editor.selectionEnd;
             editor.value = editor.value.substring(0, start) + '\t' + editor.value.substring(end);
             editor.selectionStart = editor.selectionEnd = start + 1;
-            updateStats();
+            requestUiRefresh();
         }
 
         // Shortcuts
@@ -125,8 +134,7 @@ document.addEventListener('DOMContentLoaded', function () {
     newBtn.addEventListener('click', () => {
         if (confirm('Clear current document?')) {
             editor.value = '';
-            updateLineNumbers();
-            updateStats();
+            requestUiRefresh();
             scheduleAutosave();
         }
     });
@@ -197,6 +205,13 @@ document.addEventListener('DOMContentLoaded', function () {
             applySettings();
         });
     }
+    if (powerSavingToggle) {
+        powerSavingToggle.addEventListener('change', (e) => {
+            settings.powerSaving = e.target.checked;
+            saveSettings();
+            applySettings();
+        });
+    }
 
     themeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -229,7 +244,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Window Resize
     window.addEventListener('resize', () => {
-        if (settings.wordWrap) updateLineNumbers();
+        if (settings.wordWrap) {
+            resetLineNumberRenderCache();
+            requestUiRefresh();
+        }
     });
 
     // --- Functions: Core Logic ---
@@ -250,6 +268,29 @@ document.addEventListener('DOMContentLoaded', function () {
             saveTabContent();
             updateSaveStatus(window.i18n ? window.i18n.saved : 'Saved');
         }, AUTOSAVE_DELAY);
+    }
+
+    function requestUiRefresh() {
+        if (refreshFrameId !== null) return;
+        refreshFrameId = window.requestAnimationFrame(() => {
+            refreshFrameId = null;
+            updateStats();
+            updateLineNumbers();
+        });
+    }
+
+    function resetLineNumberRenderCache() {
+        lastRenderedLineCount = -1;
+        lastRenderWrapMode = null;
+        lastActiveLineIndex = -1;
+    }
+
+    function countLines(text) {
+        let lines = 1;
+        for (let i = 0; i < text.length; i++) {
+            if (text.charCodeAt(i) === 10) lines++;
+        }
+        return lines;
     }
 
     // --- Functions: Search & Replace ---
@@ -295,8 +336,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (selectedText === query) {
             editor.setRangeText(replacement, start, end, 'select');
-            updateLineNumbers();
-            updateStats();
+            requestUiRefresh();
             findNext();
         } else {
             findNext();
@@ -312,8 +352,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const matchCount = (editor.value.match(regex) || []).length;
 
         editor.value = editor.value.replace(regex, replacement);
-        updateLineNumbers();
-        updateStats();
+        requestUiRefresh();
         searchStats.textContent = `Replaced ${matchCount} occurrence(s)`;
     }
 
@@ -335,6 +374,9 @@ document.addEventListener('DOMContentLoaded', function () {
         wordWrapToggle.checked = settings.wordWrap;
         if (spellCheckToggle) {
             spellCheckToggle.checked = settings.spellCheck;
+        }
+        if (powerSavingToggle) {
+            powerSavingToggle.checked = !!settings.powerSaving;
         }
 
         themeBtns.forEach(btn => {
@@ -367,6 +409,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Theme
         const body = document.body;
         body.classList.remove('light-mode', 'dark-mode');
+        body.classList.toggle('power-saving', !!settings.powerSaving);
 
         if (settings.theme === 'system') {
             if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -378,7 +421,8 @@ document.addEventListener('DOMContentLoaded', function () {
             body.classList.add(settings.theme + '-mode');
         }
 
-        updateLineNumbers();
+        resetLineNumberRenderCache();
+        requestUiRefresh();
     }
 
     function getEditorLanguage() {
@@ -423,6 +467,43 @@ document.addEventListener('DOMContentLoaded', function () {
         const label = document.querySelector('label[for="spellCheckToggle"]');
         if (label) {
             label.textContent = getSpellCheckLabel();
+        }
+    }
+
+    function ensurePowerSavingToggle() {
+        if (powerSavingToggle || !settingsModal) return;
+
+        const modalBody = settingsModal.querySelector('.modal-body');
+        if (!modalBody) return;
+
+        const row = document.createElement('div');
+        row.className = 'setting-group row';
+
+        const label = document.createElement('label');
+        label.setAttribute('for', 'powerSavingToggle');
+        label.textContent = getPowerSavingLabel();
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = 'powerSavingToggle';
+
+        row.appendChild(label);
+        row.appendChild(input);
+
+        const spellCheckRow = spellCheckToggle ? spellCheckToggle.closest('.setting-group.row') : null;
+        if (spellCheckRow) {
+            spellCheckRow.insertAdjacentElement('afterend', row);
+        } else {
+            modalBody.appendChild(row);
+        }
+
+        powerSavingToggle = input;
+    }
+
+    function localizePowerSavingToggleLabel() {
+        const label = document.querySelector('label[for="powerSavingToggle"]');
+        if (label) {
+            label.textContent = getPowerSavingLabel();
         }
     }
 
@@ -472,6 +553,10 @@ document.addEventListener('DOMContentLoaded', function () {
         };
 
         return labels[base] || 'Spell Check';
+    }
+
+    function getPowerSavingLabel() {
+        return (window.i18n && window.i18n.powerSaving) ? window.i18n.powerSaving : 'Power Saving Mode';
     }
 
     // --- Functions: Tabs ---
@@ -595,8 +680,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (tab) {
             const saved = localStorage.getItem(STORAGE_PREFIX + id);
             editor.value = saved !== null ? saved : (tab.content || '');
-            updateLineNumbers();
+            resetLineNumberRenderCache();
             updateStats();
+            updateLineNumbers();
         }
         if (currentTabEl) currentTabEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
     }
@@ -661,8 +747,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
             editor.value = e.target.result;
             saveTabContent();
-            updateLineNumbers();
+            resetLineNumberRenderCache();
             updateStats();
+            updateLineNumbers();
         };
         reader.readAsText(file);
     }
@@ -696,78 +783,94 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateStats() {
         const text = editor.value;
-        const words = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
+        const trimmed = text.trim();
+        const words = trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+        const lines = countLines(text);
         const wLabel = window.i18n ? window.i18n.words : 'words';
         const cLabel = window.i18n ? window.i18n.chars : 'chars';
         const lLabel = window.i18n ? window.i18n.lines : 'lines';
 
         wordCountEl.textContent = `${words} ${wLabel}`;
         charCountEl.textContent = `${text.length} ${cLabel}`;
-        lineCountEl.textContent = `${text.split('\n').length} ${lLabel}`;
+        lineCountEl.textContent = `${lines} ${lLabel}`;
     }
 
     function updateLineNumbers() {
         const value = editor.value;
         const lines = value.split('\n');
+        const lineCount = lines.length;
+
+        const isWrapped = settings.wordWrap;
+        if (!isWrapped && lastRenderWrapMode === false && lastRenderedLineCount === lineCount) {
+            updateActiveLine();
+            return;
+        }
+
         lineNumbers.innerHTML = '';
         const fragment = document.createDocumentFragment();
 
-        const isWrapped = settings.wordWrap;
-
         if (!isWrapped) {
-            lines.forEach((_, index) => {
+            for (let index = 0; index < lineCount; index++) {
                 const el = document.createElement('div');
                 el.className = 'line-number';
                 el.textContent = index + 1;
                 fragment.appendChild(el);
-            });
+            }
         } else {
-            // Measure wrap height
-            const mirror = document.createElement('div');
+            if (!lineMeasureMirror) {
+                lineMeasureMirror = document.createElement('div');
+                lineMeasureMirror.style.position = 'absolute';
+                lineMeasureMirror.style.visibility = 'hidden';
+                lineMeasureMirror.style.height = 'auto';
+                lineMeasureMirror.style.whiteSpace = 'pre-wrap';
+                lineMeasureMirror.style.wordWrap = 'break-word';
+                lineMeasureMirror.style.padding = '0';
+                document.body.appendChild(lineMeasureMirror);
+            }
+
             const editorStyle = window.getComputedStyle(editor);
+            lineMeasureMirror.style.width = (editor.clientWidth - parseFloat(editorStyle.paddingLeft) - parseFloat(editorStyle.paddingRight)) + 'px';
+            lineMeasureMirror.style.font = editorStyle.font;
+            lineMeasureMirror.style.fontSize = settings.fontSize + 'px';
+            lineMeasureMirror.style.lineHeight = editorStyle.lineHeight;
 
-            mirror.style.position = 'absolute';
-            mirror.style.visibility = 'hidden';
-            mirror.style.height = 'auto';
-            mirror.style.width = editor.clientWidth - parseFloat(editorStyle.paddingLeft) - parseFloat(editorStyle.paddingRight) + 'px';
-            mirror.style.font = editorStyle.font;
-            mirror.style.fontSize = settings.fontSize + 'px'; // Ensure font size matches
-            mirror.style.lineHeight = editorStyle.lineHeight;
-            mirror.style.whiteSpace = 'pre-wrap';
-            mirror.style.wordWrap = 'break-word';
-            mirror.style.padding = '0';
+            const shouldMeasureLineHeights = lineCount <= WRAP_MEASURE_LINE_LIMIT;
 
-            document.body.appendChild(mirror);
-
-            lines.forEach((line, index) => {
+            for (let index = 0; index < lineCount; index++) {
+                const line = lines[index];
                 const el = document.createElement('div');
                 el.className = 'line-number';
                 el.textContent = index + 1;
 
-                mirror.textContent = line + '\u200b'; // Zero-width space
-                const height = mirror.offsetHeight;
-                el.style.height = height + 'px';
+                if (shouldMeasureLineHeights) {
+                    lineMeasureMirror.textContent = line + '\u200b';
+                    const height = lineMeasureMirror.offsetHeight;
+                    el.style.height = height + 'px';
+                }
 
                 fragment.appendChild(el);
-            });
-
-            document.body.removeChild(mirror);
+            }
         }
 
         lineNumbers.appendChild(fragment);
+        lastRenderedLineCount = lineCount;
+        lastRenderWrapMode = isWrapped;
         updateActiveLine();
     }
 
     function updateActiveLine() {
         if (document.activeElement !== editor) return;
 
-        const textBeforeCaret = editor.value.substring(0, editor.selectionStart);
-        const currentLineIndex = textBeforeCaret.split('\n').length - 1;
-
+        const textBeforeCaret = editor.value.slice(0, editor.selectionStart);
+        const currentLineIndex = countLines(textBeforeCaret) - 1;
         const nums = lineNumbers.children;
-        for (let i = 0; i < nums.length; i++) {
-            if (i === currentLineIndex) nums[i].classList.add('active');
-            else nums[i].classList.remove('active');
+
+        if (lastActiveLineIndex >= 0 && lastActiveLineIndex < nums.length && lastActiveLineIndex !== currentLineIndex) {
+            nums[lastActiveLineIndex].classList.remove('active');
         }
+        if (currentLineIndex >= 0 && currentLineIndex < nums.length) {
+            nums[currentLineIndex].classList.add('active');
+        }
+        lastActiveLineIndex = currentLineIndex;
     }
 });

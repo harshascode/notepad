@@ -7,7 +7,7 @@
   /* Glassmorphism Variables */
   --glass-bg: rgba(255, 255, 255, 0.65);
   --glass-border: rgba(255, 255, 255, 0.4);
-  --glass-blur: 12px;
+  --glass-blur: 10px;
   --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
 
   /* Text Colors */
@@ -112,6 +112,7 @@ body.dark-mode {
   opacity: 0.6;
   border-radius: 50%;
   animation: blob-bounce 20s infinite ease-in-out alternate;
+  will-change: transform;
 }
 
 .blob-1 {
@@ -174,7 +175,7 @@ body.dark-mode {
   justify-content: space-between;
   align-items: center;
   padding: 20px 0;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease;
   z-index: 10;
 }
 
@@ -300,7 +301,7 @@ body.dark-mode {
   display: flex;
   align-items: stretch;
   gap: 0;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   flex: 0 0 auto;
   min-width: 96px;
   user-select: none;
@@ -381,7 +382,7 @@ body.dark-mode {
   justify-content: center;
   cursor: pointer;
   opacity: 0.6;
-  transition: all 0.2s;
+  transition: color 0.2s, border-color 0.2s, opacity 0.2s;
   flex-shrink: 0;
 }
 
@@ -407,7 +408,7 @@ body.dark-mode {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s, transform 0.12s;
   position: relative;
 }
 
@@ -447,7 +448,8 @@ body.dark-mode {
   transform: translateY(-20px);
   opacity: 0;
   pointer-events: none;
-  transition: all 0.3s var(--ease-smooth);
+  transition: transform 0.3s var(--ease-smooth), opacity 0.3s var(--ease-smooth);
+  will-change: transform, opacity;
 }
 
 .search-bar.active {
@@ -493,7 +495,7 @@ body.dark-mode {
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 .search-btn:hover {
@@ -661,7 +663,7 @@ body.dark-mode {
   font-size: 13px;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
 }
 
 .theme-btn.active {
@@ -702,7 +704,7 @@ body.dark-mode {
   text-decoration: none;
   font-weight: 500;
   font-size: 14px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   border: 1px solid transparent;
 }
 
@@ -780,13 +782,58 @@ input[type=range]::-webkit-slider-runnable-track {
   transform: translateY(20px);
   opacity: 0;
   pointer-events: none;
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
   z-index: 200;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .blob {
+    opacity: 0.18;
+    filter: blur(48px);
+  }
 }
 
 .notification.show {
   transform: translateY(0);
   opacity: 1;
+}
+
+/* Power Saving Mode */
+body.power-saving .sidebar,
+body.power-saving .toolbar,
+body.power-saving .status-bar,
+body.power-saving .search-bar,
+body.power-saving .modal-overlay {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.power-saving .line-number {
+  transition: none !important;
+}
+
+body.power-saving .blob {
+  animation: none !important;
+  transform: none !important;
+  filter: blur(40px);
+  opacity: 0.2;
+}
+
+body.power-saving .logo-wrapper:hover,
+body.power-saving .icon-btn:active,
+body.power-saving .search-bar,
+body.power-saving .notification,
+body.power-saving .notification.show,
+body.power-saving .modal-overlay.active .modal,
+body.power-saving .lang-grid .lang-option:hover {
+  transform: none !important;
 }
 
 /* Custom Scrollbar */
