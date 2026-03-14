@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const AUTOSAVE_DELAY = 1000;
     const STORAGE_PREFIX = 'notepad_v2_';
     const TABS_KEY = 'notepad_v2_tabs';
+    const ACTIVE_TAB_KEY = 'notepad_v2_active_tab';
     const TAB_TITLE_MAX_LENGTH = 20;
     const WRAP_MEASURE_LINE_LIMIT = 2000;
     let tabs = [];
@@ -87,6 +88,10 @@ document.addEventListener('DOMContentLoaded', function () {
     localizePowerSavingToggleLabel();
     loadSettings();
     applySettings();
+    // Prevent the browser from restoring stale textarea state over our tab-managed content.
+    editor.setAttribute('autocomplete', 'off');
+    editor.setAttribute('autocorrect', 'off');
+    editor.setAttribute('autocapitalize', 'off');
     initTabs();
 
     // --- Event Listeners ---
@@ -145,6 +150,7 @@ document.addEventListener('DOMContentLoaded', function () {
     searchToggleBtn.addEventListener('click', toggleSearchBar);
 
     fileInput.addEventListener('change', handleFileOpen);
+    window.addEventListener('pagehide', saveTabContent);
 
     // Search Actions
     closeSearchBtn.addEventListener('click', () => searchBar.classList.remove('active'));
@@ -565,7 +571,22 @@ document.addEventListener('DOMContentLoaded', function () {
         const savedTabs = localStorage.getItem(TABS_KEY);
         if (savedTabs) {
             try {
-                tabs = JSON.parse(savedTabs);
+                const parsedTabs = JSON.parse(savedTabs);
+                if (Array.isArray(parsedTabs)) {
+                    const seenIds = new Set();
+                    tabs = parsedTabs
+                        .filter(tab => tab && typeof tab.id === 'string' && typeof tab.title === 'string' && !seenIds.has(tab.id))
+                        .map(tab => {
+                            seenIds.add(tab.id);
+                            return {
+                                id: tab.id,
+                                title: normalizeTabTitle(tab.title),
+                                content: ''
+                            };
+                        });
+                } else {
+                    tabs = [];
+                }
             } catch (e) { tabs = []; }
         }
 
@@ -573,12 +594,14 @@ document.addEventListener('DOMContentLoaded', function () {
             createNewTab('Untitled', true);
         } else {
             tabs.forEach(tab => renderTab(tab));
-            setActiveTab(tabs[0].id);
+            const savedActiveTabId = localStorage.getItem(ACTIVE_TAB_KEY);
+            const initialTabId = tabs.some(tab => tab.id === savedActiveTabId) ? savedActiveTabId : tabs[0].id;
+            setActiveTab(initialTabId);
         }
     }
 
     function createNewTab(title = 'Untitled', isFirst = false) {
-        const id = 'tab_' + Date.now();
+        const id = generateTabId();
         const tab = { id, title, content: '' };
         tabs.push(tab);
         renderTab(tab);
@@ -671,6 +694,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (activeTabId) saveTabContent();
 
         activeTabId = id;
+        localStorage.setItem(ACTIVE_TAB_KEY, id);
 
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         const currentTabEl = document.querySelector(`.tab[data-id="${id}"]`);
@@ -702,6 +726,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (activeTabId === id) {
             const nextIdx = Math.max(0, idx - 1);
             setActiveTab(tabs[nextIdx].id);
+        } else if (localStorage.getItem(ACTIVE_TAB_KEY) === id) {
+            localStorage.removeItem(ACTIVE_TAB_KEY);
         }
     }
 
@@ -728,6 +754,15 @@ document.addEventListener('DOMContentLoaded', function () {
         const clean = (title || '').trim();
         const base = clean === '' ? 'Untitled' : clean;
         return base.slice(0, TAB_TITLE_MAX_LENGTH);
+    }
+
+    function generateTabId() {
+        let id = '';
+        do {
+            const randomPart = Math.random().toString(36).slice(2, 8);
+            id = 'tab_' + Date.now() + '_' + randomPart;
+        } while (tabs.some(tab => tab.id === id));
+        return id;
     }
 
     // --- Functions: File Operations ---
