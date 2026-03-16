@@ -65,8 +65,10 @@ document.addEventListener('DOMContentLoaded', function () {
     let refreshFrameId = null;
     let lastRenderedLineCount = -1;
     let lastRenderWrapMode = null;
+    let lastRenderMeasuredWrapMode = null;
     let lastActiveLineIndex = -1;
     let lineMeasureMirror = null;
+    let pendingSaveStatus = null;
 
     // Settings State
     let settings = {
@@ -74,7 +76,7 @@ document.addEventListener('DOMContentLoaded', function () {
         fontSize: 16,
         wordWrap: true,
         spellCheck: false,
-        powerSaving: false
+        powerSaving: true
     };
 
     // --- Initialization ---
@@ -271,9 +273,18 @@ document.addEventListener('DOMContentLoaded', function () {
     function scheduleAutosave() {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            saveTabContent();
-            updateSaveStatus(window.i18n ? window.i18n.saved : 'Saved');
-        }, AUTOSAVE_DELAY);
+            const flushSave = () => {
+                saveTabContent();
+                updateSaveStatus(pendingSaveStatus || (window.i18n ? window.i18n.saved : 'Saved'));
+                pendingSaveStatus = null;
+            };
+
+            if ('requestIdleCallback' in window) {
+                window.requestIdleCallback(flushSave, { timeout: 1000 });
+            } else {
+                setTimeout(flushSave, 0);
+            }
+        }, settings.powerSaving ? AUTOSAVE_DELAY * 2 : AUTOSAVE_DELAY);
     }
 
     function requestUiRefresh() {
@@ -288,6 +299,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function resetLineNumberRenderCache() {
         lastRenderedLineCount = -1;
         lastRenderWrapMode = null;
+        lastRenderMeasuredWrapMode = null;
         lastActiveLineIndex = -1;
     }
 
@@ -708,7 +720,7 @@ document.addEventListener('DOMContentLoaded', function () {
             updateStats();
             updateLineNumbers();
         }
-        if (currentTabEl) currentTabEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+        if (currentTabEl) currentTabEl.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     }
 
     function closeTab(id) {
@@ -737,6 +749,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function saveTabContent() {
         if (!activeTabId) return;
+        pendingSaveStatus = window.i18n ? window.i18n.saved : 'Saved';
         localStorage.setItem(STORAGE_PREFIX + activeTabId, editor.value);
     }
 
@@ -818,8 +831,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateStats() {
         const text = editor.value;
-        const trimmed = text.trim();
-        const words = trimmed === '' ? 0 : trimmed.split(/\s+/).length;
+        const words = countWords(text);
         const lines = countLines(text);
         const wLabel = window.i18n ? window.i18n.words : 'words';
         const cLabel = window.i18n ? window.i18n.chars : 'chars';
@@ -832,11 +844,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function updateLineNumbers() {
         const value = editor.value;
-        const lines = value.split('\n');
-        const lineCount = lines.length;
-
         const isWrapped = settings.wordWrap;
-        if (!isWrapped && lastRenderWrapMode === false && lastRenderedLineCount === lineCount) {
+        const shouldMeasureWrappedLines = isWrapped && !settings.powerSaving;
+        const lineCount = countLines(value);
+
+        if (!shouldMeasureWrappedLines && lineMeasureMirror) {
+            lineMeasureMirror.remove();
+            lineMeasureMirror = null;
+        }
+
+        if (
+            lastRenderWrapMode === isWrapped &&
+            lastRenderMeasuredWrapMode === shouldMeasureWrappedLines &&
+            lastRenderedLineCount === lineCount
+        ) {
             updateActiveLine();
             return;
         }
@@ -844,7 +865,7 @@ document.addEventListener('DOMContentLoaded', function () {
         lineNumbers.innerHTML = '';
         const fragment = document.createDocumentFragment();
 
-        if (!isWrapped) {
+        if (!shouldMeasureWrappedLines) {
             for (let index = 0; index < lineCount; index++) {
                 const el = document.createElement('div');
                 el.className = 'line-number';
@@ -870,9 +891,11 @@ document.addEventListener('DOMContentLoaded', function () {
             lineMeasureMirror.style.lineHeight = editorStyle.lineHeight;
 
             const shouldMeasureLineHeights = lineCount <= WRAP_MEASURE_LINE_LIMIT;
+            let lineStart = 0;
 
             for (let index = 0; index < lineCount; index++) {
-                const line = lines[index];
+                const nextBreak = value.indexOf('\n', lineStart);
+                const line = nextBreak === -1 ? value.slice(lineStart) : value.slice(lineStart, nextBreak);
                 const el = document.createElement('div');
                 el.className = 'line-number';
                 el.textContent = index + 1;
@@ -884,12 +907,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 fragment.appendChild(el);
+                lineStart = nextBreak === -1 ? value.length : nextBreak + 1;
             }
         }
 
         lineNumbers.appendChild(fragment);
         lastRenderedLineCount = lineCount;
         lastRenderWrapMode = isWrapped;
+        lastRenderMeasuredWrapMode = shouldMeasureWrappedLines;
         updateActiveLine();
     }
 
@@ -907,5 +932,32 @@ document.addEventListener('DOMContentLoaded', function () {
             nums[currentLineIndex].classList.add('active');
         }
         lastActiveLineIndex = currentLineIndex;
+    }
+
+    function countWords(text) {
+        let words = 0;
+        let inWord = false;
+
+        for (let i = 0; i < text.length; i++) {
+            const code = text.charCodeAt(i);
+            const isWhitespace =
+                code === 9 ||
+                code === 10 ||
+                code === 11 ||
+                code === 12 ||
+                code === 13 ||
+                code === 32;
+            if (isWhitespace) {
+                inWord = false;
+                continue;
+            }
+
+            if (!inWord) {
+                words++;
+                inWord = true;
+            }
+        }
+
+        return words;
     }
 });

@@ -810,7 +810,9 @@ body.power-saving .sidebar,
 body.power-saving .toolbar,
 body.power-saving .status-bar,
 body.power-saving .search-bar,
-body.power-saving .modal-overlay {
+body.power-saving .modal-overlay,
+body.power-saving .modal,
+body.power-saving .editor-area {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
@@ -819,11 +821,15 @@ body.power-saving .line-number {
   transition: none !important;
 }
 
+body.power-saving .background-blobs {
+  contain: layout paint style;
+}
+
 body.power-saving .blob {
   animation: none !important;
   transform: none !important;
-  filter: blur(40px);
-  opacity: 0.2;
+  filter: blur(24px);
+  opacity: 0.12;
 }
 
 body.power-saving .logo-wrapper:hover,
@@ -832,8 +838,23 @@ body.power-saving .search-bar,
 body.power-saving .notification,
 body.power-saving .notification.show,
 body.power-saving .modal-overlay.active .modal,
-body.power-saving .lang-grid .lang-option:hover {
+body.power-saving .lang-grid .lang-option:hover,
+body.power-saving .tab,
+body.power-saving .icon-btn,
+body.power-saving .search-btn,
+body.power-saving .theme-btn {
   transform: none !important;
+}
+
+body.power-saving .tab,
+body.power-saving .icon-btn,
+body.power-saving .search-btn,
+body.power-saving .theme-btn,
+body.power-saving .toolbar,
+body.power-saving .status-bar,
+body.power-saving .modal,
+body.power-saving .editor-area {
+  transition: none !important;
 }
 
 /* Custom Scrollbar */
